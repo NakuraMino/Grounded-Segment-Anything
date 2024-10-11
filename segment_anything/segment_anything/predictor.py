@@ -61,6 +61,36 @@ class SamPredictor:
 
         self.set_torch_image(input_image_torch, image.shape[:2])
 
+    def set_images(self,
+        images: np.ndarray,
+        image_format: str = "RGB",
+    ) -> None:
+        """
+        Calculates the image embeddings for the provided image, allowing
+        masks to be predicted with the 'predict' method.
+
+        Arguments:
+          image (np.ndarray): The image for calculating masks. Expects an
+            image in HWC uint8 format, with pixel values in [0, 255].
+          image_format (str): The color format of the image, in ['RGB', 'BGR'].
+        """
+        assert image_format in [
+            "RGB",
+            "BGR",
+        ], f"image_format must be in ['RGB', 'BGR'], is {image_format}."
+        # import pdb;pdb.set_trace()
+        if image_format != self.model.image_format:
+            images = images[..., ::-1]
+
+        # Transform the image to the form expected by the model
+        # import pdb;pdb.set_trace()
+        input_image = np.array([self.transform.apply_image(i) for i in images])
+        input_image_torch = torch.as_tensor(input_image, device=self.device)
+        input_image_torch = input_image_torch.permute(0, 3, 1, 2).contiguous()
+
+        self.set_torch_image(input_image_torch, images.shape[1:3])
+
+
     @torch.no_grad()
     def set_torch_image(
         self,
@@ -149,7 +179,12 @@ class SamPredictor:
         if box is not None:
             box = self.transform.apply_boxes(box, self.original_size)
             box_torch = torch.as_tensor(box, dtype=torch.float, device=self.device)
-            box_torch = box_torch[None, :]
+            print('box shape', box.shape, box_torch.shape)
+            if box.shape[0] == 1:
+                box_torch = box_torch[None, :]
+            else:
+                box_torch = box_torch[:,None, :]
+            print('box shape', box.shape, box_torch.shape)
         if mask_input is not None:
             mask_input_torch = torch.as_tensor(mask_input, dtype=torch.float, device=self.device)
             mask_input_torch = mask_input_torch[None, :, :, :]
@@ -163,11 +198,13 @@ class SamPredictor:
             return_logits=return_logits,
             hq_token_only=hq_token_only,
         )
-
-        masks_np = masks[0].detach().cpu().numpy()
-        iou_predictions_np = iou_predictions[0].detach().cpu().numpy()
-        low_res_masks_np = low_res_masks[0].detach().cpu().numpy()
-        return masks_np, iou_predictions_np, low_res_masks_np
+        masks_np = masks.detach().cpu().numpy()
+        iou_predictions_np = iou_predictions.detach().cpu().numpy()
+        low_res_masks_np = low_res_masks.detach().cpu().numpy()
+        if box.shape[0] == 1:
+            return masks_np[0], iou_predictions_np[0], low_res_masks_np[0]
+        else:
+            return masks_np, iou_predictions_np, low_res_masks_np
 
     @torch.no_grad()
     def predict_torch(

@@ -7,6 +7,7 @@ import torchvision
 from torchvision.transforms import ToTensor
 
 from groundingdino.util.inference import Model
+from efficient_sam.build_efficient_sam import build_efficient_sam_vitt, build_efficient_sam_vits
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -18,9 +19,11 @@ GROUNDING_DINO_CHECKPOINT_PATH = "./groundingdino_swint_ogc.pth"
 grounding_dino_model = Model(model_config_path=GROUNDING_DINO_CONFIG_PATH, model_checkpoint_path=GROUNDING_DINO_CHECKPOINT_PATH)
 
 # Building MobileSAM predictor
-EFFICIENT_SAM_CHECHPOINT_PATH = "./EfficientSAM/efficientsam_s_gpu.jit"
-efficientsam = torch.jit.load(EFFICIENT_SAM_CHECHPOINT_PATH)
-
+# EFFICIENT_SAM_CHECHPOINT_PATH = "./EfficientSAM/weights/efficient_sam_vits.pt" # sam_s_gpu.jit"
+# efficientsam = torch.jit.load(EFFICIENT_SAM_CHECHPOINT_PATH)
+# efficientsam = build_efficient_sam_vitt()
+efficientsam = build_efficient_sam_vits()
+efficientsam.to(DEVICE)
 
 # Predict classes and hyper-param for GroundingDINO
 SOURCE_IMAGE_PATH = "./EfficientSAM/LightHQSAM/example_light_hqsam.png"
@@ -32,7 +35,9 @@ NMS_THRESHOLD = 0.8
 
 # load image
 image = cv2.imread(SOURCE_IMAGE_PATH)
+import time 
 
+start = time.time()
 # detect objects
 detections = grounding_dino_model.predict_with_classes(
     image=image,
@@ -113,6 +118,7 @@ labels = [
     in detections]
 annotated_image = mask_annotator.annotate(scene=image.copy(), detections=detections)
 annotated_image = box_annotator.annotate(scene=annotated_image, detections=detections, labels=labels)
-
+end = time.time()
+print(f"Time: {end-start}")
 # save the annotated grounded-sam image
 cv2.imwrite("EfficientSAM/gronded_efficient_sam_anontated_image.jpg", annotated_image)

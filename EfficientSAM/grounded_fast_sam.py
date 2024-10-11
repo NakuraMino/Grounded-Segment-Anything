@@ -5,6 +5,9 @@ from FastSAM.tools import *
 from groundingdino.util.inference import load_model, load_image, predict, annotate, Model
 from torchvision.ops import box_convert
 import ast
+import os
+import torch
+import numpy as np 
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -80,7 +83,8 @@ def main(args):
     # Build Fast-SAM Model
     # ckpt_path = "/comp_robot/rentianhe/code/Grounded-Segment-Anything/FastSAM/FastSAM-x.pt"
     model = YOLO(args.model_path)
-
+    import time 
+    start = time.time()
     results = model(
         args.img_path,
         imgsz=args.imgsz,
@@ -134,7 +138,8 @@ def main(args):
             bbox=boxes[box_idx],
         )
         cv2.imwrite(os.path.join(save_path, basename + f"_{str(box_idx)}_caption_{phrases[box_idx]}.jpg"), cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR))
-
+    end = time.time()
+    print(f"Time: {end-start}")
 
 if __name__ == "__main__":
     args = parse_args()

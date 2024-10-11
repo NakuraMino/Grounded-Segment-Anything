@@ -5,7 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
-
+*.pth
 # Distribution / packaging
 .Python
 build/
@@ -133,3 +133,11 @@ dmypy.json
 outputs/
 
 .idea/
+
+weights/ 
+recognize-anything/
+FastSAM-x.pt
+EfficientSAM/weights/
+EfficientSAM/efficient_sam_vits.pt.zip
+grounded-sam-osx
+grounded-sam-osx/

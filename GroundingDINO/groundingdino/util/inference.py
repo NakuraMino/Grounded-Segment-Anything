@@ -62,27 +62,57 @@ def predict(
 
     model = model.to(device)
     image = image.to(device)
+    N = 1
+    if len(image.shape) == 4:
+        N = image.shape[0]
+        captions = [caption for i in range(N)]
+        with torch.no_grad():
+            outputs = model(image, captions=captions)
+            prediction_logits = outputs["pred_logits"].cpu().sigmoid()  # prediction_logits.shape = (bsz，nq, 256)
+            prediction_boxes = outputs["pred_boxes"].cpu()  # prediction_boxes.shape = (bsz, nq, 4)
+            logits_res = []
+            boxs_res = []
+            phrases_list = []
+            tokenizer = model.tokenizer
+            for ub_logits, ub_boxes, ub_captions in zip(prediction_logits, prediction_boxes, captions):
+                mask = ub_logits.max(dim=1)[0] > box_threshold
+                logits = ub_logits[mask]  # logits.shape = (n, 256)
+                boxes = ub_boxes[mask]  # boxes.shape = (n, 4)
+                logits_res.append(logits.max(dim=1)[0])
+                boxs_res.append(boxes)
 
-    with torch.no_grad():
-        outputs = model(image[None], captions=[caption])
+                tokenized = tokenizer(ub_captions)
+                phrases = [
+                    get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer).replace('.', '')
+                    for logit
+                    in logits
+                ]
+                phrases_list.append(phrases)
+            print('bboxs:', boxs_res)
+            print('logits:', logits_res)
+            print('phrases:', phrases_list)
+            return boxs_res, logits_res, phrases_list
+    else:
+        with torch.no_grad():
+            outputs = model(image[None], captions=[caption])
 
-    prediction_logits = outputs["pred_logits"].cpu().sigmoid()[0]  # prediction_logits.shape = (nq, 256)
-    prediction_boxes = outputs["pred_boxes"].cpu()[0]  # prediction_boxes.shape = (nq, 4)
+        prediction_logits = outputs["pred_logits"].cpu().sigmoid()[0]  # prediction_logits.shape = (nq, 256)
+        prediction_boxes = outputs["pred_boxes"].cpu()[0]  # prediction_boxes.shape = (nq, 4)
 
-    mask = prediction_logits.max(dim=1)[0] > box_threshold
-    logits = prediction_logits[mask]  # logits.shape = (n, 256)
-    boxes = prediction_boxes[mask]  # boxes.shape = (n, 4)
+        mask = prediction_logits.max(dim=1)[0] > box_threshold
+        logits = prediction_logits[mask]  # logits.shape = (n, 256)
+        boxes = prediction_boxes[mask]  # boxes.shape = (n, 4)
 
-    tokenizer = model.tokenizer
-    tokenized = tokenizer(caption)
+        tokenizer = model.tokenizer
+        tokenized = tokenizer(caption)
 
-    phrases = [
-        get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer).replace('.', '')
-        for logit
-        in logits
-    ]
+        phrases = [
+            get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer).replace('.', '')
+            for logit
+            in logits
+        ]
 
-    return boxes, logits.max(dim=1)[0], phrases
+        return boxes, logits.max(dim=1)[0], phrases
 
 
 def annotate(image_source: np.ndarray, boxes: torch.Tensor, logits: torch.Tensor, phrases: List[str]) -> np.ndarray:
@@ -191,7 +221,11 @@ class Model:
         annotated_image = box_annotator.annotate(scene=image, detections=detections)
         """
         caption = ". ".join(classes)
-        processed_image = Model.preprocess_image(image_bgr=image).to(self.device)
+        if len(image.shape) == 4:
+            processed_image = torch.stack([Model.preprocess_image(image_bgr=i).to(self.device) for i in image])
+        else:
+            processed_image = Model.preprocess_image(image_bgr=image).to(self.device)
+        print(processed_image.shape)
         boxes, logits, phrases = predict(
             model=self.model,
             image=processed_image,
@@ -199,15 +233,29 @@ class Model:
             box_threshold=box_threshold,
             text_threshold=text_threshold,
             device=self.device)
-        source_h, source_w, _ = image.shape
-        detections = Model.post_process_result(
-            source_h=source_h,
-            source_w=source_w,
-            boxes=boxes,
-            logits=logits)
-        class_id = Model.phrases2classes(phrases=phrases, classes=classes)
-        detections.class_id = class_id
-        return detections
+        if len(image.shape) == 4:
+            N, source_h, source_w, _ = image.shape
+            all_detections = []
+            for b,l,p in zip(boxes, logits, phrases):
+                detections = Model.post_process_result(
+                    source_h=source_h,
+                    source_w=source_w,
+                    boxes=b,
+                    logits=l)
+                class_id = Model.phrases2classes(phrases=p, classes=classes)
+                detections.class_id = class_id
+                all_detections.append(detections)
+            return all_detections
+        else:
+            source_h, source_w, _ = image.shape
+            detections = Model.post_process_result(
+                source_h=source_h,
+                source_w=source_w,
+                boxes=boxes,
+                logits=logits)
+            class_id = Model.phrases2classes(phrases=phrases, classes=classes)
+            detections.class_id = class_id
+            return detections
 
     @staticmethod
     def preprocess_image(image_bgr: np.ndarray) -> torch.Tensor:
